@@ -1,0 +1,86 @@
+---
+- name: Install APP
+  hosts: all
+  become: yes
+  vars:
+    app_user: apiuser
+    app_dir: /opt/myapp
+    virtualenv_dir: /opt/myapp/venv
+    repo_url: https://gist.github.com/thibaultserti/21456f4797100376f67443920e5d5145.git
+
+  tasks:
+    - name: Install Python3 et GIT
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - python3
+        - python3-venv
+        - git
+
+    - name: Create user
+      user:
+        name: "{{ app_user }}"
+        shell: /bin/bash
+        create_home: yes
+
+    - name: Create directory
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+
+    - name: Clone repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}/app"
+        version: main
+        force: yes
+
+    - name: Create Python virtual environment
+      command: python3 -m venv {{ virtualenv_dir }}
+      args:
+        creates: "{{ virtualenv_dir }}"
+
+    - name: Install dependencies
+      pip:
+        requirements: "{{ app_dir }}/app/requirements.txt"
+        virtualenv: "{{ virtualenv_dir }}"
+        virtualenv_command: python3 -m venv
+
+    - name: Copy main.py to the application directory
+      copy:
+        src: "{{ app_dir }}/app/main.py"
+        dest: "{{ app_dir }}/app/main.py"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: '0755'
+        remote_src: yes
+
+    - name: Create systemd service file
+      copy:
+        dest: /etc/systemd/system/myapp.service
+        content: |
+          [Unit]
+          Description=My API Service
+          After=network.target
+
+          [Service]
+          User={{ app_user }}
+          Group={{ app_user }}
+          WorkingDirectory={{ app_dir }}/app
+          Environment="PATH={{ virtualenv_dir }}/bin"
+          ExecStart={{ virtualenv_dir }}/bin/python main.py
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd
+      command: systemctl daemon-reload
+
+    - name: Enable myapp service
+      systemd:
+        name: myapp
+        enabled: yes
+        state: started
